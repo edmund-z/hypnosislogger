@@ -46,8 +46,20 @@ async function createQueryFn(): Promise<QueryFn> {
   } else {
     const { PGlite } = await import("@electric-sql/pglite");
     const { mkdirSync } = await import("node:fs");
-    mkdirSync("./.data/pglite", { recursive: true });
-    const db = new PGlite("./.data/pglite");
+    // Prefer ./.data (persists across restarts in local dev). On serverless
+    // the project dir is read-only, so fall back to /tmp — EPHEMERAL storage,
+    // good enough to preview the app before DATABASE_URL is configured.
+    let dir = "./.data/pglite";
+    try {
+      mkdirSync(dir, { recursive: true });
+    } catch {
+      dir = "/tmp/hl-pglite";
+      mkdirSync(dir, { recursive: true });
+      console.warn(
+        "DATABASE_URL is not set — using ephemeral /tmp storage. Entries will NOT survive. Configure DATABASE_URL for real use."
+      );
+    }
+    const db = new PGlite(dir);
     query = (text, params) => db.query(text, params as never[]);
   }
   for (const stmt of SCHEMA.split(";").map((s) => s.trim()).filter(Boolean)) {
