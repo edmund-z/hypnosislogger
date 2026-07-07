@@ -36,6 +36,7 @@ export default function LogPage() {
   const [dump, setDump] = useState("");
   const [entry, setEntry] = useState<EditableEntry | null>(null);
   const [missing, setMissing] = useState<RequiredField[]>([]);
+  const [reused, setReused] = useState<string[]>([]);
   const [skipped, setSkipped] = useState<RequiredField[]>([]);
   const [answer, setAnswer] = useState("");
   const [merging, setMerging] = useState(false);
@@ -76,6 +77,7 @@ export default function LogPage() {
       setDump(d);
       setEntry(parsed);
       setMissing(parsed.missing_required);
+      setReused(parsed.reused_metaphors ?? []);
       setSkipped([]);
       setPhase("review");
     } catch (err) {
@@ -110,6 +112,7 @@ export default function LogPage() {
       });
       setEntry(parsed);
       setMissing(parsed.missing_required);
+      setReused(parsed.reused_metaphors ?? []);
       setAnswer("");
     } catch (err) {
       setError((err as Error).message);
@@ -168,7 +171,7 @@ export default function LogPage() {
             Missing: {stillMissing.join(", ")}
           </p>
         )}
-        <EntryCard entry={entry} onChange={onEntryEdited} />
+        <EntryCard entry={entry} onChange={onEntryEdited} reusedMetaphors={reused} />
 
         {currentQuestion && (
           <div className="followup">

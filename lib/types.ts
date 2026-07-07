@@ -37,6 +37,9 @@ export type ParsedEntry = {
   effectiveness: number | null;
   notes: string | null;
   missing_required: RequiredField[];
+  // Metaphors that matched an existing bank entry (computed server-side by
+  // key lookup, not model self-reporting) — shown as "reused" on review.
+  reused_metaphors?: string[];
 };
 
 // Normalized grouping key for a metaphor: case-, punctuation- and

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { listGoalTags, listMetaphors } from "@/lib/db";
 import { parseDump, ParseRequest } from "@/lib/parse";
+import { metaphorKey } from "@/lib/types";
 
 export const maxDuration = 60;
 
@@ -20,6 +21,12 @@ export async function POST(req: NextRequest) {
       listMetaphors(),
     ]);
     const parsed = await parseDump(body, tags, metaphors);
+    // Which parsed metaphors landed on an existing bank entry — determined
+    // by lookup, so the "reused" marker never lies.
+    const bank = new Set(metaphors.map(metaphorKey));
+    parsed.reused_metaphors = parsed.metaphors.filter((m) =>
+      bank.has(metaphorKey(m))
+    );
     return NextResponse.json(parsed);
   } catch (err) {
     const e = err as Error & { status?: number };

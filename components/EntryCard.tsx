@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { metaphorKey } from "@/lib/types";
 
 export type EditableEntry = {
   date: string;
@@ -34,10 +35,14 @@ const FIELDS: { key: FieldKey; label: string; kind: "text" | "date" | "number" |
 export default function EntryCard({
   entry,
   onChange,
+  reusedMetaphors,
 }: {
   entry: EditableEntry;
   onChange: (e: EditableEntry) => void;
+  // Metaphors that matched an existing bank entry — marked "↺ reused".
+  reusedMetaphors?: string[];
 }) {
+  const reusedKeys = new Set((reusedMetaphors ?? []).map(metaphorKey));
   const [editing, setEditing] = useState<FieldKey | null>(null);
   const [draft, setDraft] = useState("");
 
@@ -113,6 +118,17 @@ export default function EntryCard({
                 onKeyDown={(e) => e.key === "Enter" && commit(f.key, f.kind)}
               />
             )
+          ) : f.key === "metaphors" && entry.metaphors.length > 0 ? (
+            <span className="field-value">
+              {entry.metaphors.map((m, i) => (
+                <span key={i} style={{ display: "block" }}>
+                  • {m}
+                  {reusedKeys.has(metaphorKey(m)) && (
+                    <span className="reused-tag">↺ reused</span>
+                  )}
+                </span>
+              ))}
+            </span>
           ) : (
             <span
               className={`field-value ${display(f.key, f.kind) ? "" : "empty"}`}
