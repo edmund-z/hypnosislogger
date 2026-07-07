@@ -3,9 +3,9 @@
 import { deflateSync } from "node:zlib";
 import { mkdirSync, writeFileSync } from "node:fs";
 
-const CREAM = [0xf4, 0xed, 0xe0];
-const ESPRESSO = [0x2b, 0x21, 0x18];
-const GOLD = [0xbd, 0x9a, 0x4a];
+const BG = [0x0e, 0x17, 0x26];
+const INK = [0xea, 0xf0, 0xf9];
+const ACCENT = [0x43, 0xd6, 0xb5];
 
 function crc32(buf) {
   let table = crc32.table;
@@ -70,7 +70,7 @@ function drawIcon(size) {
 
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
-      set(x, y, CREAM);
+      set(x, y, BG);
       const dx = x - cx;
       const dy = y - cy;
       const r = Math.hypot(dx, dy);
@@ -85,10 +85,10 @@ function drawIcon(size) {
       if (minDist < stroke / 2) {
         // anti-alias edge
         const t = minDist / (stroke / 2);
-        const c = t > 0.75 ? GOLD.map((g, i) => Math.round(g * 0.35 + CREAM[i] * 0.65)) : GOLD;
+        const c = t > 0.75 ? ACCENT.map((g, i) => Math.round(g * 0.35 + BG[i] * 0.65)) : ACCENT;
         set(x, y, c);
       } else if (r < stroke * 0.9) {
-        set(x, y, ESPRESSO); // center dot
+        set(x, y, INK); // center dot
       }
     }
   }

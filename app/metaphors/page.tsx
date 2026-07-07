@@ -91,7 +91,7 @@ export default function MetaphorsPage() {
                   )}
                 </div>
                 {isOpen && (
-                  <div style={{ marginTop: 10, borderTop: "1px solid var(--cream-deep)", paddingTop: 8 }}>
+                  <div style={{ marginTop: 10, borderTop: "1px solid var(--surface-2)", paddingTop: 8 }}>
                     {m.entries.map((e) => (
                       <Link
                         key={e.id}

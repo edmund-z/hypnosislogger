@@ -128,7 +128,7 @@ export default function StatsPage() {
             <div className="card">
               <div className="stat-num">
                 {s.thisMonthCount}
-                <span style={{ fontSize: 16, color: "var(--espresso-soft)" }}>
+                <span style={{ fontSize: 16, color: "var(--ink-soft)" }}>
                   {" "}
                   vs {s.lastMonthCount}
                 </span>

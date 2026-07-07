@@ -54,10 +54,12 @@ export default function LogPage() {
   }
 
   async function callParse(body: object): Promise<ParsedEntry> {
+    // en-CA locale formats as YYYY-MM-DD in the user's local timezone.
+    const today = new Date().toLocaleDateString("en-CA");
     const res = await fetch("/api/parse", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ ...body, today }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || `Parse failed (${res.status}).`);
@@ -181,7 +183,7 @@ export default function LogPage() {
             />
             <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
               <button
-                className="btn btn-gold btn-sm"
+                className="btn btn-accent btn-sm"
                 onClick={submitAnswer}
                 disabled={merging || !answer.trim()}
               >
@@ -265,7 +267,7 @@ export default function LogPage() {
               >
                 {p}
               </span>
-              <button className="btn btn-gold btn-sm" onClick={() => handleParse(p)}>
+              <button className="btn btn-accent btn-sm" onClick={() => handleParse(p)}>
                 Retry
               </button>
               <button

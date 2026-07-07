@@ -103,6 +103,9 @@ export type ParseRequest = {
   dump: string;
   entry?: Partial<ParsedEntry> | null;
   answers?: { field: RequiredField; answer: string }[];
+  // Client's local date (YYYY-MM-DD) so "yesterday" resolves against the
+  // user's timezone, not the server's UTC clock.
+  today?: string;
 };
 
 export async function parseDump(
@@ -118,7 +121,10 @@ export async function parseDump(
     );
   }
   const client = new Anthropic();
-  const today = new Date().toISOString().slice(0, 10);
+  const today =
+    req.today && /^\d{4}-\d{2}-\d{2}$/.test(req.today)
+      ? req.today
+      : new Date().toISOString().slice(0, 10);
 
   let userContent = `Voice dump of the session:\n\n"""\n${req.dump}\n"""`;
   if (req.entry && req.answers?.length) {

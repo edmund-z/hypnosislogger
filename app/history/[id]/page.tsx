@@ -97,7 +97,7 @@ export default function EntryDetailPage() {
         <>
           <EntryCard entry={draft} onChange={setDraft} />
           <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
-            <button className="btn btn-gold" onClick={saveEdits} disabled={busy}>
+            <button className="btn btn-accent" onClick={saveEdits} disabled={busy}>
               {busy ? "Saving…" : "Save changes"}
             </button>
             <button className="btn btn-ghost" onClick={() => setEditing(false)}>
@@ -137,7 +137,7 @@ export default function EntryDetailPage() {
 
           <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
             <button
-              className="btn btn-gold"
+              className="btn btn-accent"
               onClick={() => {
                 setDraft({ ...entry });
                 setEditing(true);
