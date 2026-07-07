@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useEntries, formatDate } from "@/lib/useEntries";
-import type { Entry } from "@/lib/types";
+import { metaphorKey, type Entry } from "@/lib/types";
 
 type MetaphorAgg = {
   key: string;
@@ -21,7 +21,7 @@ function buildGroups(entries: Entry[]): Group[] {
     if (!byTag.has(tag)) byTag.set(tag, new Map());
     const bucket = byTag.get(tag)!;
     for (const m of e.metaphors) {
-      const key = m.trim().toLowerCase();
+      const key = metaphorKey(m);
       if (!key) continue;
       if (!bucket.has(key)) bucket.set(key, { key, text: m, entries: [], avgEff: null });
       bucket.get(key)!.entries.push(e);

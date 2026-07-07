@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { listGoalTags } from "@/lib/db";
+import { listGoalTags, listMetaphors } from "@/lib/db";
 import { parseDump, ParseRequest } from "@/lib/parse";
 
 export const maxDuration = 60;
@@ -15,8 +15,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Empty dump." }, { status: 400 });
   }
   try {
-    const tags = await listGoalTags();
-    const parsed = await parseDump(body, tags);
+    const [tags, metaphors] = await Promise.all([
+      listGoalTags(),
+      listMetaphors(),
+    ]);
+    const parsed = await parseDump(body, tags, metaphors);
     return NextResponse.json(parsed);
   } catch (err) {
     const e = err as Error & { status?: number };

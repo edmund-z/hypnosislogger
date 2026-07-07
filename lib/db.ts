@@ -187,6 +187,27 @@ export async function deleteEntry(id: string): Promise<boolean> {
   return res.rows.length > 0;
 }
 
+// Every distinct metaphor ever logged (first-seen wording kept as canonical).
+// Fed to the parser so conceptually-identical metaphors get canonicalized to
+// one wording and count as reuses in the Metaphor Bank.
+export async function listMetaphors(): Promise<string[]> {
+  const { metaphorKey } = await import("./types");
+  const query = await getQuery();
+  const res = await query("SELECT metaphors FROM entries");
+  const seen = new Map<string, string>();
+  for (const row of res.rows) {
+    const list =
+      typeof row.metaphors === "string"
+        ? (JSON.parse(row.metaphors) as string[])
+        : ((row.metaphors as string[]) ?? []);
+    for (const m of list) {
+      const key = metaphorKey(m);
+      if (key && !seen.has(key)) seen.set(key, m);
+    }
+  }
+  return Array.from(seen.values());
+}
+
 export async function listGoalTags(): Promise<string[]> {
   const query = await getQuery();
   const res = await query(

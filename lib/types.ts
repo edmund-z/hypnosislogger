@@ -39,6 +39,18 @@ export type ParsedEntry = {
   missing_required: RequiredField[];
 };
 
+// Normalized grouping key for a metaphor: case-, punctuation- and
+// whitespace-insensitive, so trivial wording variants ("knob - turn" vs
+// "knob — turn") still count as the same metaphor. Conceptual matching
+// (truly different wording, same metaphor) is handled at parse time by
+// giving Claude the existing bank to canonicalize against.
+export function metaphorKey(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+
 export function computeMissing(e: {
   goal: string | null;
   metaphors: string[];

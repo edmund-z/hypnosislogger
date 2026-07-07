@@ -37,7 +37,7 @@ const ENTRY_SCHEMA = {
       type: "array",
       items: { type: "string" },
       description:
-        "Each distinct metaphor/visualization as its own short item, e.g. 'radio volume knob — turn down analytical channel'.",
+        "Each distinct metaphor/visualization as its own short item, e.g. 'radio volume knob — turn down analytical channel'. If a metaphor is conceptually the same as one in the existing metaphor bank, use the bank's wording verbatim.",
     },
     technique: {
       anyOf: [{ type: "string" }, { type: "null" }],
@@ -82,7 +82,11 @@ const ENTRY_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-function systemPrompt(existingTags: string[], today: string): string {
+function systemPrompt(
+  existingTags: string[],
+  existingMetaphors: string[],
+  today: string
+): string {
   return `You are the parsing engine of a personal hypnosis session logger. The user is a hypnotist who dictates free-form descriptions of one-on-one hypnosis sessions. Extract the session into structured fields.
 
 Today's date is ${today}. Resolve relative dates ("yesterday", "last Tuesday") against it.
@@ -91,7 +95,13 @@ Rules:
 - Only extract what is actually said or clearly implied. Never invent details.
 - "who" and "location" are optional — null if not mentioned.
 - "language" defaults to "English" unless the dump indicates otherwise ("I did it in French", the session clearly happened in another language).
-- Split distinct metaphors/visualizations into separate short items; keep the hypnotist's own imagery and wording.
+- Split distinct metaphors/visualizations into separate short items.
+- METAPHOR CANONICALIZATION (important): the hypnotist reuses the same metaphors with different wording across sessions, and reuses must group together. Below is the existing metaphor bank. If a metaphor in this dump is conceptually the same as one in the bank — same core image and mechanism, even if described with completely different words — output the bank's wording VERBATIM, character for character. Only write new wording when the metaphor is genuinely new. When in doubt whether two metaphors are the same, prefer matching to the bank if they share the same central image (e.g. anything about turning down a radio/volume/dial on thoughts matches a 'radio volume knob' entry); treat them as new only if the central image itself is different.
+${
+    existingMetaphors.length
+      ? `Existing metaphor bank:\n${existingMetaphors.map((m) => `  - ${m}`).join("\n")}`
+      : "Existing metaphor bank: (empty — every metaphor in this dump is new)"
+  }
 - "goal_tag" is a short normalized lowercase category. Existing tags in the log: ${
     existingTags.length ? existingTags.join(", ") : "(none yet)"
   }. Reuse one of these whenever it fits the goal; only create a new tag when nothing fits.
@@ -110,7 +120,8 @@ export type ParseRequest = {
 
 export async function parseDump(
   req: ParseRequest,
-  existingTags: string[]
+  existingTags: string[],
+  existingMetaphors: string[]
 ): Promise<ParsedEntry> {
   if (!process.env.ANTHROPIC_API_KEY) {
     throw Object.assign(
@@ -142,7 +153,7 @@ export async function parseDump(
   const response = await client.messages.create({
     model: MODEL,
     max_tokens: 4096,
-    system: systemPrompt(existingTags, today),
+    system: systemPrompt(existingTags, existingMetaphors, today),
     output_config: {
       format: { type: "json_schema", schema: ENTRY_SCHEMA },
     },

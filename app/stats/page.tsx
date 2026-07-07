@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { useEntries } from "@/lib/useEntries";
-import type { Entry } from "@/lib/types";
+import { metaphorKey, type Entry } from "@/lib/types";
 
 function avg(nums: number[]): number | null {
   if (!nums.length) return null;
@@ -40,7 +40,7 @@ function computeStats(entries: Entry[]) {
   const metaphorMap = new Map<string, { text: string; count: number; effs: number[] }>();
   for (const e of entries) {
     for (const m of e.metaphors) {
-      const key = m.trim().toLowerCase();
+      const key = metaphorKey(m);
       if (!key) continue;
       if (!metaphorMap.has(key)) metaphorMap.set(key, { text: m, count: 0, effs: [] });
       const agg = metaphorMap.get(key)!;
