@@ -31,7 +31,12 @@ declare global {
 }
 
 async function createQueryFn(): Promise<QueryFn> {
-  const url = process.env.DATABASE_URL;
+  // Vercel storage integrations name the connection string differently by
+  // provider (Neon: DATABASE_URL, Vercel Postgres: POSTGRES_URL) — accept any.
+  const url =
+    process.env.DATABASE_URL ||
+    process.env.POSTGRES_URL ||
+    process.env.POSTGRES_PRISMA_URL;
   let query: QueryFn;
   if (url) {
     const { Pool } = await import("pg");
