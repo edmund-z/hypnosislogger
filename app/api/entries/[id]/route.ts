@@ -1,5 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { deleteEntry, getEntry, updateEntry, NewEntry } from "@/lib/db";
+import {
+  getEntry,
+  purgeEntry,
+  trashEntry,
+  updateEntry,
+  NewEntry,
+} from "@/lib/db";
+import { embedEntry } from "@/lib/embeddings";
 import { computeMissing } from "@/lib/types";
 
 type Params = { params: Promise<{ id: string }> };
@@ -29,6 +36,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       ...body,
       incomplete: computeMissing(merged).length > 0,
     });
+    if (updated) await embedEntry(updated); // keep semantic index in sync
     return NextResponse.json(updated);
   } catch (err) {
     console.error("update entry failed:", err);
@@ -36,12 +44,14 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   }
 }
 
-export async function DELETE(_req: NextRequest, { params }: Params) {
+// Default delete = move to trash (restorable). ?permanent=1 purges for good.
+export async function DELETE(req: NextRequest, { params }: Params) {
   const { id } = await params;
+  const permanent = req.nextUrl.searchParams.get("permanent") === "1";
   try {
-    const ok = await deleteEntry(id);
+    const ok = permanent ? await purgeEntry(id) : await trashEntry(id);
     if (!ok) return NextResponse.json({ error: "Not found." }, { status: 404 });
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, permanent });
   } catch (err) {
     console.error("delete entry failed:", err);
     return NextResponse.json({ error: "Database error." }, { status: 500 });

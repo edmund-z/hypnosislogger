@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useEntries } from "@/lib/useEntries";
 import { metaphorKey, type Entry } from "@/lib/types";
 
@@ -101,6 +101,26 @@ function Bars({ data, max }: { data: [string, number][]; max: number }) {
 export default function StatsPage() {
   const { entries, error } = useEntries();
   const s = useMemo(() => (entries ? computeStats(entries) : null), [entries]);
+  const [backupMsg, setBackupMsg] = useState("");
+  const [backupBusy, setBackupBusy] = useState(false);
+
+  async function backupNow() {
+    setBackupBusy(true);
+    setBackupMsg("");
+    try {
+      const res = await fetch("/api/backup");
+      const data = await res.json();
+      setBackupMsg(
+        data.ok
+          ? `Backed up ${data.entries} entries to ${data.file} ✓`
+          : data.error || "Backup failed."
+      );
+    } catch {
+      setBackupMsg("Backup failed — network error.");
+    } finally {
+      setBackupBusy(false);
+    }
+  }
 
   return (
     <main className="page">
@@ -176,6 +196,19 @@ export default function StatsPage() {
           <a href="/api/export" className="btn btn-ghost" style={{ width: "100%", marginTop: 8 }}>
             Export all data as JSON
           </a>
+          <button
+            className="btn btn-ghost"
+            style={{ width: "100%", marginTop: 8 }}
+            onClick={backupNow}
+            disabled={backupBusy}
+          >
+            {backupBusy ? "Backing up…" : "Back up to GitHub now"}
+          </button>
+          {backupMsg && (
+            <p className="muted" style={{ marginTop: 8, textAlign: "center" }}>
+              {backupMsg}
+            </p>
+          )}
         </>
       )}
     </main>

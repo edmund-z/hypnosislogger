@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createEntry, listEntries, NewEntry } from "@/lib/db";
+import { createEntry, listEntries, listTrash, NewEntry } from "@/lib/db";
+import { embedEntry } from "@/lib/embeddings";
 import { computeMissing } from "@/lib/types";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
-    return NextResponse.json(await listEntries());
+    const trash = req.nextUrl.searchParams.get("trash") === "1";
+    return NextResponse.json(trash ? await listTrash() : await listEntries());
   } catch (err) {
     console.error("list entries failed:", err);
     return NextResponse.json({ error: "Database error." }, { status: 500 });
@@ -42,6 +44,7 @@ export async function POST(req: NextRequest) {
   };
   try {
     const created = await createEntry(entry);
+    await embedEntry(created); // no-op without VOYAGE_API_KEY; never blocks
     return NextResponse.json(created, { status: 201 });
   } catch (err) {
     console.error("create entry failed:", err);

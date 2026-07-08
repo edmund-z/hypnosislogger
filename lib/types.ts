@@ -13,6 +13,7 @@ export type Entry = {
   raw_dump: string;
   incomplete: boolean;
   created_at: string;
+  deleted_at?: string | null;
 };
 
 export type RequiredField = "effectiveness" | "goal" | "metaphors" | "technique";

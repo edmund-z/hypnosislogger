@@ -82,6 +82,17 @@ const ENTRY_SCHEMA = {
   additionalProperties: false,
 } as const;
 
+// One dump can describe several sessions (e.g. a workshop night) — the parser
+// always returns a list, usually of length 1.
+const BATCH_SCHEMA = {
+  type: "object",
+  properties: {
+    entries: { type: "array", items: ENTRY_SCHEMA },
+  },
+  required: ["entries"],
+  additionalProperties: false,
+} as const;
+
 function systemPrompt(
   existingTags: string[],
   existingMetaphors: string[],
@@ -92,6 +103,7 @@ function systemPrompt(
 Today's date is ${today}. Resolve relative dates ("yesterday", "last Tuesday") against it.
 
 Rules:
+- The dump usually describes ONE session, but may describe several distinct sessions with different people (e.g. "tonight at the workshop I did three sessions: first..."). Return one entry per distinct session, in the order described. Multiple goals or metaphors with the SAME person in one sitting is still one session.
 - Only extract what is actually said or clearly implied. Never invent details.
 - "who" and "location" are optional — null if not mentioned.
 - "language" defaults to "English" unless the dump indicates otherwise ("I did it in French", the session clearly happened in another language).
@@ -122,7 +134,7 @@ export async function parseDump(
   req: ParseRequest,
   existingTags: string[],
   existingMetaphors: string[]
-): Promise<ParsedEntry> {
+): Promise<ParsedEntry[]> {
   if (!process.env.ANTHROPIC_API_KEY) {
     throw Object.assign(
       new Error(
@@ -147,7 +159,7 @@ export async function parseDump(
       .map((a) => `- Asked about "${a.field}", they answered: "${a.answer}"`)
       .join(
         "\n"
-      )}\n\nMerge the answers into the entry and return the full updated entry. Keep all previously extracted fields unless an answer corrects them.`;
+      )}\n\nMerge the answers into the entry and return exactly ONE entry — the full updated entry. Keep all previously extracted fields unless an answer corrects them.`;
   }
 
   const response = await client.messages.create({
@@ -155,7 +167,7 @@ export async function parseDump(
     max_tokens: 4096,
     system: systemPrompt(existingTags, existingMetaphors, today),
     output_config: {
-      format: { type: "json_schema", schema: ENTRY_SCHEMA },
+      format: { type: "json_schema", schema: BATCH_SCHEMA },
     },
     messages: [{ role: "user", content: userContent }],
   });
@@ -171,10 +183,19 @@ export async function parseDump(
       status: 502,
     });
   }
-  const parsed = JSON.parse(text.text) as ParsedEntry;
-  parsed.language = parsed.language?.trim() || "English";
-  parsed.metaphors = (parsed.metaphors ?? []).filter((m) => m && m.trim());
-  // Recompute missing fields locally — the source of truth for follow-ups.
-  parsed.missing_required = computeMissing(parsed);
-  return parsed;
+  const batch = JSON.parse(text.text) as { entries: ParsedEntry[] };
+  const entries = (batch.entries ?? []).map((parsed) => {
+    parsed.language = parsed.language?.trim() || "English";
+    parsed.metaphors = (parsed.metaphors ?? []).filter((m) => m && m.trim());
+    // Recompute missing fields locally — the source of truth for follow-ups.
+    parsed.missing_required = computeMissing(parsed);
+    return parsed;
+  });
+  if (entries.length === 0) {
+    throw Object.assign(
+      new Error("The parser found no session in this dump."),
+      { status: 422 }
+    );
+  }
+  return entries;
 }

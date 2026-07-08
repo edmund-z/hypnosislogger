@@ -6,6 +6,11 @@ export async function middleware(req: NextRequest) {
   const token = req.cookies.get(AUTH_COOKIE)?.value;
   const ok = await isValidToken(token);
 
+  // /api/backup authenticates itself (cron secret OR session cookie).
+  if (pathname === "/api/backup") {
+    return NextResponse.next();
+  }
+
   if (pathname === "/login" || pathname === "/api/login") {
     if (ok && pathname === "/login") {
       return NextResponse.redirect(new URL("/", req.url));

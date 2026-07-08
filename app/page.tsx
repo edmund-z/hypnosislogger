@@ -35,6 +35,10 @@ export default function LogPage() {
   const [phase, setPhase] = useState<Phase>("dump");
   const [dump, setDump] = useState("");
   const [entry, setEntry] = useState<EditableEntry | null>(null);
+  // One dump can yield several sessions (workshop nights) — review them
+  // one at a time as a queue.
+  const [queue, setQueue] = useState<ParsedEntry[]>([]);
+  const [queueIdx, setQueueIdx] = useState(0);
   const [missing, setMissing] = useState<RequiredField[]>([]);
   const [reused, setReused] = useState<string[]>([]);
   const [skipped, setSkipped] = useState<RequiredField[]>([]);
@@ -54,7 +58,7 @@ export default function LogPage() {
     setTimeout(() => setToast(""), 2500);
   }
 
-  async function callParse(body: object): Promise<ParsedEntry> {
+  async function callParse(body: object): Promise<ParsedEntry[]> {
     // en-CA locale formats as YYYY-MM-DD in the user's local timezone.
     const today = new Date().toLocaleDateString("en-CA");
     const res = await fetch("/api/parse", {
@@ -64,7 +68,15 @@ export default function LogPage() {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || `Parse failed (${res.status}).`);
-    return data as ParsedEntry;
+    return (data as { entries: ParsedEntry[] }).entries;
+  }
+
+  function showParsed(parsed: ParsedEntry) {
+    setEntry(parsed);
+    setMissing(parsed.missing_required);
+    setReused(parsed.reused_metaphors ?? []);
+    setSkipped([]);
+    setAnswer("");
   }
 
   async function handleParse(text?: string) {
@@ -73,12 +85,11 @@ export default function LogPage() {
     setError("");
     setPhase("parsing");
     try {
-      const parsed = await callParse({ dump: d });
+      const entries = await callParse({ dump: d });
       setDump(d);
-      setEntry(parsed);
-      setMissing(parsed.missing_required);
-      setReused(parsed.reused_metaphors ?? []);
-      setSkipped([]);
+      setQueue(entries);
+      setQueueIdx(0);
+      showParsed(entries[0]);
       setPhase("review");
     } catch (err) {
       // Never lose a dump: stash it locally as pending and let the user retry.
@@ -105,7 +116,7 @@ export default function LogPage() {
     setMerging(true);
     setError("");
     try {
-      const parsed = await callParse({
+      const [parsed] = await callParse({
         dump,
         entry,
         answers: [{ field: currentQuestion, answer: answer.trim() }],
@@ -140,6 +151,14 @@ export default function LogPage() {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || "Save failed.");
       }
+      if (queueIdx < queue.length - 1) {
+        // More sessions from this dump — advance to the next one.
+        const next = queueIdx + 1;
+        setQueueIdx(next);
+        showParsed(queue[next]);
+        showToast(`Saved ✓ (${next} of ${queue.length})`);
+        return;
+      }
       // Clear this dump from pending if it was there.
       const pending = loadPending().filter((p) => p !== dump);
       savePending(pending);
@@ -148,8 +167,10 @@ export default function LogPage() {
       setEntry(null);
       setMissing([]);
       setSkipped([]);
+      setQueue([]);
+      setQueueIdx(0);
       setPhase("dump");
-      showToast("Saved ✓");
+      showToast(queue.length > 1 ? `Saved all ${queue.length} ✓` : "Saved ✓");
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -163,7 +184,9 @@ export default function LogPage() {
   if (phase === "review" && entry) {
     return (
       <main className="page">
-        <h1 className="page-title">Review</h1>
+        <h1 className="page-title">
+          Review{queue.length > 1 ? ` — session ${queueIdx + 1} of ${queue.length}` : ""}
+        </h1>
         <p className="page-sub">Tap any field to correct it.</p>
         {stillMissing.length > 0 && (
           <p className="muted" style={{ marginBottom: 10 }}>

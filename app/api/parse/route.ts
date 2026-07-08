@@ -20,14 +20,16 @@ export async function POST(req: NextRequest) {
       listGoalTags(),
       listMetaphors(),
     ]);
-    const parsed = await parseDump(body, tags, metaphors);
+    const entries = await parseDump(body, tags, metaphors);
     // Which parsed metaphors landed on an existing bank entry — determined
     // by lookup, so the "reused" marker never lies.
     const bank = new Set(metaphors.map(metaphorKey));
-    parsed.reused_metaphors = parsed.metaphors.filter((m) =>
-      bank.has(metaphorKey(m))
-    );
-    return NextResponse.json(parsed);
+    for (const parsed of entries) {
+      parsed.reused_metaphors = parsed.metaphors.filter((m) =>
+        bank.has(metaphorKey(m))
+      );
+    }
+    return NextResponse.json({ entries });
   } catch (err) {
     const e = err as Error & { status?: number };
     console.error("parse failed:", e);

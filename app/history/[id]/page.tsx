@@ -15,6 +15,45 @@ export default function EntryDetailPage() {
   const [draft, setDraft] = useState<EditableEntry | null>(null);
   const [showRaw, setShowRaw] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [versions, setVersions] = useState<
+    { id: string; snapshot: Entry; created_at: string }[] | null
+  >(null);
+
+  async function loadVersions() {
+    const res = await fetch(`/api/entries/${id}/versions`);
+    if (res.ok) setVersions(await res.json());
+  }
+
+  async function restoreVersion(snapshot: Entry) {
+    if (!confirm("Restore this earlier version? The current state is kept in history too.")) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/entries/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          date: snapshot.date,
+          location: snapshot.location,
+          who: snapshot.who,
+          language: snapshot.language,
+          goal: snapshot.goal,
+          goal_tag: snapshot.goal_tag,
+          metaphors: snapshot.metaphors,
+          technique: snapshot.technique,
+          effectiveness: snapshot.effectiveness,
+          notes: snapshot.notes,
+          raw_dump: snapshot.raw_dump,
+        }),
+      });
+      if (!res.ok) throw new Error("Restore failed.");
+      setEntry((await res.json()) as Entry);
+      setVersions(null);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   useEffect(() => {
     fetch(`/api/entries/${id}`)
@@ -46,7 +85,7 @@ export default function EntryDetailPage() {
   }
 
   async function remove() {
-    if (!confirm("Delete this entry? This cannot be undone.")) return;
+    if (!confirm("Move this entry to the trash? You can restore it from History → Trash.")) return;
     setBusy(true);
     try {
       const res = await fetch(`/api/entries/${id}`, { method: "DELETE" });
@@ -121,13 +160,54 @@ export default function EntryDetailPage() {
             ))}
           </div>
 
-          <button
-            className="btn btn-ghost btn-sm"
-            style={{ marginTop: 14 }}
-            onClick={() => setShowRaw(!showRaw)}
-          >
-            {showRaw ? "Hide original" : "Show original"}
-          </button>
+          <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => setShowRaw(!showRaw)}
+            >
+              {showRaw ? "Hide original" : "Show original"}
+            </button>
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => (versions ? setVersions(null) : loadVersions())}
+            >
+              {versions ? "Hide edit history" : "Edit history"}
+            </button>
+          </div>
+          {versions && (
+            <div className="card" style={{ marginTop: 10 }}>
+              <span className="field-label">Edit history</span>
+              {versions.length === 0 ? (
+                <p className="muted" style={{ marginTop: 6 }}>
+                  No earlier versions — this entry has never been edited.
+                </p>
+              ) : (
+                versions.map((v) => (
+                  <div
+                    key={v.id}
+                    style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderBottom: "1px solid var(--surface-2)" }}
+                  >
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div className="entry-row-date">
+                        {new Date(v.created_at).toLocaleString()}
+                      </div>
+                      <div className="muted" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {v.snapshot.goal || "(no goal)"} · eff {v.snapshot.effectiveness ?? "—"} ·{" "}
+                        {v.snapshot.metaphors.length} metaphor{v.snapshot.metaphors.length === 1 ? "" : "s"}
+                      </div>
+                    </div>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => restoreVersion(v.snapshot)}
+                      disabled={busy}
+                    >
+                      Restore
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
           {showRaw && (
             <div className="card" style={{ marginTop: 10 }}>
               <span className="field-label">Original voice dump</span>

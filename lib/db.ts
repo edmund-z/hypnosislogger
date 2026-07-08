@@ -1,9 +1,10 @@
 import type { Entry } from "./types";
 
 // Database adapter: uses Postgres via DATABASE_URL when set (production),
-// otherwise falls back to an embedded PGlite database in ./.data (local dev).
+// otherwise falls back to an embedded PGlite database (local dev / preview).
 type QueryResult = { rows: Record<string, unknown>[] };
 type QueryFn = (text: string, params?: unknown[]) => Promise<QueryResult>;
+type DB = { query: QueryFn; vectorEnabled: boolean };
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS entries (
@@ -23,16 +24,29 @@ CREATE TABLE IF NOT EXISTS entries (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS entries_date_idx ON entries (date DESC, created_at DESC);
+ALTER TABLE entries ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
+CREATE TABLE IF NOT EXISTS entry_versions (
+  id uuid PRIMARY KEY,
+  entry_id uuid NOT NULL,
+  snapshot jsonb NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS entry_versions_entry_idx ON entry_versions (entry_id, created_at DESC);
+`;
+
+// Semantic search (optional): pgvector extension + embedding column. Applied
+// separately so environments without pgvector still run everything else.
+const VECTOR_SCHEMA = `
+CREATE EXTENSION IF NOT EXISTS vector;
+ALTER TABLE entries ADD COLUMN IF NOT EXISTS embedding vector(1024);
 `;
 
 declare global {
   // eslint-disable-next-line no-var
-  var __hlQuery: Promise<QueryFn> | undefined;
+  var __hlDb: Promise<DB> | undefined;
 }
 
-async function createQueryFn(): Promise<QueryFn> {
-  // Vercel storage integrations name the connection string differently by
-  // provider (Neon: DATABASE_URL, Vercel Postgres: POSTGRES_URL) — accept any.
+async function createDb(): Promise<DB> {
   const url =
     process.env.DATABASE_URL ||
     process.env.POSTGRES_URL ||
@@ -50,6 +64,7 @@ async function createQueryFn(): Promise<QueryFn> {
     query = (text, params) => pool.query(text, params as never[]);
   } else {
     const { PGlite } = await import("@electric-sql/pglite");
+    const { vector } = await import("@electric-sql/pglite/vector");
     const { mkdirSync } = await import("node:fs");
     // Prefer ./.data (persists across restarts in local dev). On serverless
     // the project dir is read-only, so fall back to /tmp — EPHEMERAL storage,
@@ -64,19 +79,28 @@ async function createQueryFn(): Promise<QueryFn> {
         "DATABASE_URL is not set — using ephemeral /tmp storage. Entries will NOT survive. Configure DATABASE_URL for real use."
       );
     }
-    const db = new PGlite(dir);
+    const db = new PGlite(dir, { extensions: { vector } });
     query = (text, params) => db.query(text, params as never[]);
   }
   for (const stmt of SCHEMA.split(";").map((s) => s.trim()).filter(Boolean)) {
     await query(stmt);
   }
-  return query;
+  let vectorEnabled = true;
+  try {
+    for (const stmt of VECTOR_SCHEMA.split(";").map((s) => s.trim()).filter(Boolean)) {
+      await query(stmt);
+    }
+  } catch (err) {
+    vectorEnabled = false;
+    console.warn("pgvector unavailable — semantic search disabled:", err);
+  }
+  return { query, vectorEnabled };
 }
 
-function getQuery(): Promise<QueryFn> {
+function getDb(): Promise<DB> {
   // Cached on globalThis so hot reload / multiple route modules share one pool.
-  if (!globalThis.__hlQuery) globalThis.__hlQuery = createQueryFn();
-  return globalThis.__hlQuery;
+  if (!globalThis.__hlDb) globalThis.__hlDb = createDb();
+  return globalThis.__hlDb;
 }
 
 function toEntry(row: Record<string, unknown>): Entry {
@@ -90,6 +114,7 @@ function toEntry(row: Record<string, unknown>): Entry {
       ? (JSON.parse(row.metaphors) as string[])
       : ((row.metaphors as string[]) ?? []);
   const createdAt = row.created_at;
+  const deletedAt = row.deleted_at;
   return {
     id: String(row.id),
     date,
@@ -106,34 +131,54 @@ function toEntry(row: Record<string, unknown>): Entry {
     incomplete: Boolean(row.incomplete),
     created_at:
       createdAt instanceof Date ? createdAt.toISOString() : String(createdAt),
+    deleted_at:
+      deletedAt == null
+        ? null
+        : deletedAt instanceof Date
+          ? deletedAt.toISOString()
+          : String(deletedAt),
   };
 }
 
+const ENTRY_COLS =
+  "id, date, location, who, language, goal, goal_tag, metaphors, technique, effectiveness, notes, raw_dump, incomplete, created_at, deleted_at";
+
 export async function listEntries(): Promise<Entry[]> {
-  const query = await getQuery();
+  const { query } = await getDb();
   const res = await query(
-    "SELECT * FROM entries ORDER BY date DESC, created_at DESC"
+    `SELECT ${ENTRY_COLS} FROM entries WHERE deleted_at IS NULL ORDER BY date DESC, created_at DESC`
+  );
+  return res.rows.map(toEntry);
+}
+
+export async function listTrash(): Promise<Entry[]> {
+  const { query } = await getDb();
+  const res = await query(
+    `SELECT ${ENTRY_COLS} FROM entries WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC`
   );
   return res.rows.map(toEntry);
 }
 
 export async function getEntry(id: string): Promise<Entry | null> {
-  const query = await getQuery();
-  const res = await query("SELECT * FROM entries WHERE id = $1", [id]);
+  const { query } = await getDb();
+  const res = await query(
+    `SELECT ${ENTRY_COLS} FROM entries WHERE id = $1`,
+    [id]
+  );
   return res.rows[0] ? toEntry(res.rows[0]) : null;
 }
 
-export type NewEntry = Omit<Entry, "id" | "created_at">;
+export type NewEntry = Omit<Entry, "id" | "created_at" | "deleted_at">;
 
 export async function createEntry(e: NewEntry): Promise<Entry> {
-  const query = await getQuery();
+  const { query } = await getDb();
   const id = crypto.randomUUID();
   const res = await query(
     `INSERT INTO entries
        (id, date, location, who, language, goal, goal_tag, metaphors,
         technique, effectiveness, notes, raw_dump, incomplete)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-     RETURNING *`,
+     RETURNING ${ENTRY_COLS}`,
     [
       id,
       e.date,
@@ -159,14 +204,19 @@ export async function updateEntry(
 ): Promise<Entry | null> {
   const existing = await getEntry(id);
   if (!existing) return null;
+  const { query } = await getDb();
+  // Every edit snapshots the prior state — nothing is ever silently lost.
+  await query(
+    "INSERT INTO entry_versions (id, entry_id, snapshot) VALUES ($1, $2, $3)",
+    [crypto.randomUUID(), id, JSON.stringify(existing)]
+  );
   const merged = { ...existing, ...e };
-  const query = await getQuery();
   const res = await query(
     `UPDATE entries SET
        date=$2, location=$3, who=$4, language=$5, goal=$6, goal_tag=$7,
        metaphors=$8, technique=$9, effectiveness=$10, notes=$11,
        raw_dump=$12, incomplete=$13
-     WHERE id=$1 RETURNING *`,
+     WHERE id=$1 RETURNING ${ENTRY_COLS}`,
     [
       id,
       merged.date,
@@ -186,10 +236,59 @@ export async function updateEntry(
   return res.rows[0] ? toEntry(res.rows[0]) : null;
 }
 
-export async function deleteEntry(id: string): Promise<boolean> {
-  const query = await getQuery();
+export async function listVersions(
+  entryId: string
+): Promise<{ id: string; snapshot: Entry; created_at: string }[]> {
+  const { query } = await getDb();
+  const res = await query(
+    "SELECT id, snapshot, created_at FROM entry_versions WHERE entry_id = $1 ORDER BY created_at DESC",
+    [entryId]
+  );
+  return res.rows.map((r) => ({
+    id: String(r.id),
+    snapshot:
+      typeof r.snapshot === "string"
+        ? (JSON.parse(r.snapshot) as Entry)
+        : (r.snapshot as Entry),
+    created_at:
+      r.created_at instanceof Date
+        ? r.created_at.toISOString()
+        : String(r.created_at),
+  }));
+}
+
+// Delete = move to trash. Restorable until purged.
+export async function trashEntry(id: string): Promise<boolean> {
+  const { query } = await getDb();
+  const res = await query(
+    "UPDATE entries SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL RETURNING id",
+    [id]
+  );
+  return res.rows.length > 0;
+}
+
+export async function restoreEntry(id: string): Promise<boolean> {
+  const { query } = await getDb();
+  const res = await query(
+    "UPDATE entries SET deleted_at = NULL WHERE id = $1 RETURNING id",
+    [id]
+  );
+  return res.rows.length > 0;
+}
+
+export async function purgeEntry(id: string): Promise<boolean> {
+  const { query } = await getDb();
+  await query("DELETE FROM entry_versions WHERE entry_id = $1", [id]);
   const res = await query("DELETE FROM entries WHERE id = $1 RETURNING id", [id]);
   return res.rows.length > 0;
+}
+
+export async function listGoalTags(): Promise<string[]> {
+  const { query } = await getDb();
+  const res = await query(
+    "SELECT DISTINCT goal_tag FROM entries WHERE goal_tag IS NOT NULL AND deleted_at IS NULL ORDER BY goal_tag"
+  );
+  return res.rows.map((r) => String(r.goal_tag));
 }
 
 // Every distinct metaphor ever logged (first-seen wording kept as canonical).
@@ -197,8 +296,10 @@ export async function deleteEntry(id: string): Promise<boolean> {
 // one wording and count as reuses in the Metaphor Bank.
 export async function listMetaphors(): Promise<string[]> {
   const { metaphorKey } = await import("./types");
-  const query = await getQuery();
-  const res = await query("SELECT metaphors FROM entries");
+  const { query } = await getDb();
+  const res = await query(
+    "SELECT metaphors FROM entries WHERE deleted_at IS NULL"
+  );
   const seen = new Map<string, string>();
   for (const row of res.rows) {
     const list =
@@ -213,10 +314,45 @@ export async function listMetaphors(): Promise<string[]> {
   return Array.from(seen.values());
 }
 
-export async function listGoalTags(): Promise<string[]> {
-  const query = await getQuery();
+// ---------- semantic search (pgvector) ----------
+
+export async function vectorAvailable(): Promise<boolean> {
+  return (await getDb()).vectorEnabled;
+}
+
+export async function setEmbedding(id: string, vec: number[]): Promise<void> {
+  const { query, vectorEnabled } = await getDb();
+  if (!vectorEnabled) return;
+  await query("UPDATE entries SET embedding = $2::vector WHERE id = $1", [
+    id,
+    JSON.stringify(vec),
+  ]);
+}
+
+export async function listMissingEmbeddings(
+  limit: number
+): Promise<Entry[]> {
+  const { query, vectorEnabled } = await getDb();
+  if (!vectorEnabled) return [];
   const res = await query(
-    "SELECT DISTINCT goal_tag FROM entries WHERE goal_tag IS NOT NULL ORDER BY goal_tag"
+    `SELECT ${ENTRY_COLS} FROM entries WHERE embedding IS NULL AND deleted_at IS NULL ORDER BY created_at DESC LIMIT $1`,
+    [limit]
   );
-  return res.rows.map((r) => String(r.goal_tag));
+  return res.rows.map(toEntry);
+}
+
+export async function semanticSearch(
+  vec: number[],
+  limit: number
+): Promise<Entry[]> {
+  const { query, vectorEnabled } = await getDb();
+  if (!vectorEnabled) return [];
+  const res = await query(
+    `SELECT ${ENTRY_COLS} FROM entries
+     WHERE deleted_at IS NULL AND embedding IS NOT NULL
+     ORDER BY embedding <=> $1::vector
+     LIMIT $2`,
+    [JSON.stringify(vec), limit]
+  );
+  return res.rows.map(toEntry);
 }

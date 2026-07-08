@@ -61,6 +61,37 @@ Each entry: `date`, `location?`, `who?`, `language` (default English), `goal`*,
 `incomplete` flag. Fields marked * are required — missing ones trigger
 follow-up questions but can be force-saved with an *incomplete* badge.
 
+## Data safety
+
+- **Trash, not delete** — deleting an entry moves it to a trash (History →
+  Trash) where it can be restored or purged for good.
+- **Edit history** — every edit snapshots the prior version (entry detail →
+  Edit history → Restore).
+- **Automated off-site backups** — a daily Vercel cron pushes a dated JSON
+  snapshot of the whole log to a private GitHub repo, and Stats has a
+  "Back up now" button. Setup:
+  1. Create a **private** GitHub repo, e.g. `you/hypnosis-logger-backups`.
+  2. Create a fine-grained personal access token (GitHub → Settings →
+     Developer settings → Fine-grained tokens) scoped to that repo with
+     **Contents: read and write**.
+  3. Set `BACKUP_GITHUB_REPO=you/hypnosis-logger-backups`,
+     `BACKUP_GITHUB_TOKEN=<token>`, and `CRON_SECRET=<any random string>`
+     in Vercel env vars, then redeploy.
+
+## Semantic ("deep") search
+
+Optional: set `VOYAGE_API_KEY` (free tier at voyageai.com) and the History
+screen gains a **Deep search** button that finds entries by meaning — "the
+guy who cried" matches "he got emotional", no shared keywords needed.
+Entries are embedded on save (Voyage `voyage-3.5-lite` + pgvector); older
+entries are backfilled automatically on first search and by the daily cron.
+
+## Batch logging
+
+One dump can describe several sessions ("tonight at the workshop I did
+three…") — the parser splits it into separate entries and the Log screen
+walks you through reviewing and saving each one.
+
 ## Regenerating PWA icons
 
 `npm run gen-icons` (pure Node, no image dependencies).
